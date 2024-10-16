@@ -1,0 +1,27 @@
+# This file may be used to create an environment using:
+# $ conda create --name <env> --file <this file>
+# platform: osx-arm64
+# created-by: conda 24.9.1
+accelerate=0.34.2=pypi_0
+ipykernel=6.29.5=pyh57ce528_0
+ipython=8.28.0=pyh707e725_0
+llama-cloud=0.1.2=pypi_0
+llama-index=0.11.17=pypi_0
+llama-index-cli=0.3.1=pypi_0
+llama-index-core=0.11.17=pypi_0
+llama-index-embeddings-huggingface=0.3.1=pypi_0
+llama-index-indices-managed-llama-cloud=0.4.0=pypi_0
+llama-index-legacy=0.9.48.post3=pypi_0
+llama-index-llms-huggingface=0.3.4=pypi_0
+llama-index-llms-nvidia=0.1.4=pypi_0
+llama-index-llms-ollama=0.3.3=pypi_0
+llama-index-readers-file=0.2.2=pypi_0
+llama-index-readers-llama-parse=0.3.0=pypi_0
+llama-index-vector-stores-milvus=0.1.20=pypi_0
+llama-parse=0.5.7=pypi_0
+milvus-lite=2.4.10=pypi_0
+ollama=0.3.3=pypi_0
+streamlit=1.38.0=pypi_0
+pymilvus=2.4.4=pypi_0
+tokenizers=0.19.1=pypi_0
+torch=2.4.1=pypi_0
