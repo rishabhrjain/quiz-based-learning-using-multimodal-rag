@@ -4,21 +4,27 @@ import fitz
 import os
 import re
 import streamlit as st
+import config as config
 
-
-from llama_index.core import Settings, StorageContext, SimpleDirectoryReader, VectorStoreIndex
+from llama_index.core import Settings, StorageContext, VectorStoreIndex, Document
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.vector_stores.milvus import MilvusVectorStore
+
+import weaviate
+from weaviate.classes.init import Auth
+from llama_index.vector_stores.weaviate import WeaviateVectorStore
 
 # Set up the Ollama LLM
-llm = Ollama(model="llama3.2:1b", temperature=0.1)
+llm = Ollama(model="llama3.2:1b", temperature=0.2)
 
 def initialize_settings():
     
     # Configure LlamaIndex to use the Ollama LLM
     Settings.llm = llm
     Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+
+    Settings.chunk_size = 512
+    Settings.chunk_overlap = 100
 
     if 'quiz_data' not in st.session_state:
         st.session_state['quiz_data'] = None
@@ -72,7 +78,7 @@ def extract_info_from_pdf(pdf_paths, image_dir):
         
         # Close the document
         doc.close()
-
+        all_text = " ".join(all_text)
         documents.append(all_text)
 
         
@@ -97,7 +103,7 @@ def interact_with_llm(text, difficulty_level):
     ## Get only the text from first document right now
     context = f"""
     Context: 
-    {text[0][0]}
+    {text}
     """
 
     prompt = prompt + context
@@ -121,3 +127,36 @@ def parse_llm_response(llm_response):
             print(f"Failed to parse JSON: {json_str}")
 
     return qa_pairs
+
+
+def create_weaviate_index(documents):
+
+    weaviate_url = config.WEAVIATE_URL
+    weaviate_api_key = config.WEAVIATE_API_KEY
+
+    # Connect to Weaviate Cloud
+    client = weaviate.connect_to_weaviate_cloud(
+        cluster_url=weaviate_url,
+        auth_credentials=Auth.api_key(weaviate_api_key),
+    )
+
+    collection_name = 'Hackathon'
+    if client.collections.exists(collection_name):
+        client.collections.delete(collection_name)
+        print(f"Deleted existing collection: {collection_name}")
+
+    vector_store = WeaviateVectorStore(weaviate_client=client, index_name=collection_name,
+            overwrite=True)
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+    mod_documents = [Document(text=text) for text in documents]
+
+    # Create the index
+    index = VectorStoreIndex.from_documents(
+    mod_documents, 
+    storage_context=storage_context, 
+    embed_model = Settings.embed_model
+    
+    )
+
+    return index

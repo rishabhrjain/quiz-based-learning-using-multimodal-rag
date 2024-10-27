@@ -1,9 +1,8 @@
 import streamlit as st
-from utils import initialize_settings, extract_info_from_pdf, interact_with_llm, parse_llm_response
+from utils import initialize_settings, extract_info_from_pdf, interact_with_llm, parse_llm_response, create_weaviate_index
+from llama_index.core import Settings
 
-# PDF_PATH = "/Users/rishabhjain/Documents/personal/Documents/Academics/portfolio/cse_575_portfolio_report.pdf"
 IMAGE_DIR = "extracted_images"
-
 
 ########### STREAMLIT section #######
 
@@ -27,11 +26,14 @@ def display_quiz(quiz_data):
                 on_change=update_answer,
                 args=(f"q{qa_pair['id']}",)
             )
-            
-            st.success(f"Correct Answer: {qa_pair['answer']}")
+            if st.button("Show answer", key=qa_pair['id']):
+                st.success(f"Correct Answer: {qa_pair['answer']}")
 
 def update_answer(key):
     st.session_state[key] = st.session_state[f"input_{key}"]
+
+def update_temperature():
+    st.session_state.temp_value = st.session_state.temperature
 
 
 def main():
@@ -39,78 +41,128 @@ def main():
 
     st.set_page_config(page_title="Quiz-based Learning System", page_icon="📚", layout="wide")
     st.title("📚 Quiz-based Learning System")
-    st.header("Upload PDF and Select Difficulty")
+    col1, col2 = st.columns([1, 2])
 
-    uploaded_files = st.file_uploader("Choose a PDF file", type="pdf", accept_multiple_files=True)
+    # Quiz section
+    with col1:
+        st.header("Upload PDF and Select Difficulty")
 
-    if uploaded_files and st.button("Process Files"):
+            # Initialize session state variables if they don't exist
+        if 'difficulty' not in st.session_state:
+            st.session_state.difficulty = "Medium"
+        if 'temperature' not in st.session_state:
+            st.session_state.temperature = 0.2
+
 
         st.session_state['difficulty'] = st.select_slider(
-        "Select difficulty level",
-        options=["Easy", "Medium", "Difficult"],
-        value="Medium"
+            "Select difficulty level",
+            options=["Easy", "Medium", "Difficult"],
+            value="Medium"
+            )
+        
+        st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=1.0,
+            value=st.session_state.temperature,
+            step=0.1,
+            key="temperature",
+            on_change=update_temperature
         )
-        
-        st.success("File successfully uploaded!")
-        
-        # Extract information from PDF
-        with st.spinner("Extracting information from files ..."):
-            # extracted_info = extract_info_from_pdf(uploaded_file, IMAGE_DIR)
-            st.session_state['extracted_info'] = extract_info_from_pdf(uploaded_files, IMAGE_DIR)
-        
-        st.subheader("Extracted Information")
-        # st.text_area("PDF Content Preview", extracted_info[:500] + "...", height=150)
-        
-    # Interact with LLM
-    if st.button("Generate Quiz"):
-        with st.spinner("Generating quiz based on content and difficulty..."):
-            # commenting the actual API call to save credits
-            llm_response = interact_with_llm(st.session_state['extracted_info'], st.session_state['difficulty'])
+            
+        Settings.llm.temperature = st.session_state.temperature
 
-            # Parse LLM response
-            parsed_response = parse_llm_response(llm_response)
+        uploaded_files = st.file_uploader("Choose a PDF file", type="pdf", accept_multiple_files=True)
 
-            st.session_state['quiz_data'] = parsed_response
-        
+        if uploaded_files and st.button("Process Files"):
+            
+            st.success("File successfully uploaded!")
+            
+            # Extract information from PDF
+            with st.spinner("Extracting information from files ..."):
+                # extracted_info = extract_info_from_pdf(uploaded_file, IMAGE_DIR)
+                st.session_state['extracted_info'] = extract_info_from_pdf(uploaded_files, IMAGE_DIR)
+
+                # create Vector database index
+                # st.session_state['index'] = create_index(st.session_state['extracted_info'])
+                st.session_state['index'] = create_weaviate_index(st.session_state['extracted_info'])
+            
+            st.subheader("Extracted Information")
+            # st.text_area("PDF Content Preview", extracted_info[:500] + "...", height=150)
+            
+        # Interact with LLM
+        if st.button("Generate Quiz"):
+            with st.spinner("Generating quiz based on content and difficulty..."):
+                # commenting the actual API call to save credits
+                # print("\n ##### Extracted info: \n\n", st.session_state['extracted_info'])
+                llm_response = interact_with_llm(st.session_state['extracted_info'][0], st.session_state['difficulty'])
+
+                # Parse LLM response
+                parsed_response = parse_llm_response(llm_response)
+                
+                st.session_state['quiz_data'] = parsed_response
+            
+                st.subheader("Generated Quiz")
+                display_quiz(st.session_state['quiz_data'])
+                
+        elif 'quiz_data' in st.session_state:
             st.subheader("Generated Quiz")
             display_quiz(st.session_state['quiz_data'])
-            
-    elif 'quiz_data' in st.session_state:
-        st.subheader("Generated Quiz")
-        display_quiz(st.session_state['quiz_data'])
+        
+        # Add a clear button
+        if st.button("Clear Chat"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
-    # Add a clear button
-    if st.button("Clear Chat"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    # Query-Answer using RAG
+    with col2:
+
+        if 'index' in st.session_state:
+            st.title("Chat")
+            if 'history' not in st.session_state:
+                st.session_state['history'] = []
+            
+            # llm and mebedding model is taken from initialize_settings()
+            query_engine = st.session_state['index'].as_query_engine(similarity_top_k=10, streaming=True, 
+                                                                     embed_model = Settings.embed_model)
+
+            user_input = st.chat_input("Enter your query:")
+
+            # Display chat messages
+            chat_container = st.container()
+            with chat_container:
+                for message in st.session_state['history']:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+
+            if user_input:
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+                st.session_state['history'].append({"role": "user", "content": user_input})
+                
+                with st.chat_message("assistant"):
+                    message_placeholder = st.empty()
+                    full_response = ""
+                    response = query_engine.query(user_input)
+                    for token in response.response_gen:
+                        full_response += token
+                        message_placeholder.markdown(full_response + "▌")
+                    message_placeholder.markdown(full_response)
+                st.session_state['history'].append({"role": "assistant", "content": full_response})
+
+            # Add a clear button
+            if st.button("Clear Queries"):
+                st.session_state['history'] = []
+                st.rerun()
+
+
+        # Add a clear button
+        # if st.button("Clear Chat"):
+        #     for key in list(st.session_state.keys()):
+        #         del st.session_state[key]
+        #     st.rerun()
 
 if __name__ == "__main__":
     main()
 
-# def display_quiz(quiz_data):
-#     # quiz_data = json.loads(quiz_json)
-    
-    
-#     for qa_pair in quiz_data:
-#         with st.expander(f"Question {qa_pair['id']}"):
-#             st.write(qa_pair['question'])
-#             st.text_input("Your answer:", key=f"q{qa_pair['id']}")
-#             # if st.button("Show Answer", key=f"show_answer_{qa_pair['id']}"):
-#             st.success(f"Correct Answer: {qa_pair['answer']}")
-
-# st.sidebar.header("About")
-# st.sidebar.info(
-#     "This app generates quizzes based on uploaded PDF content. "
-#     "Select the difficulty level and upload a PDF to get started!"
-# )
-
-# st.sidebar.header("Instructions")
-# st.sidebar.markdown(
-#     """
-#     1. Upload a PDF file
-#     2. Select the difficulty level
-#     3. Wait for the system to generate a quiz
-#     4. Review the generated quiz in JSON format
-#     """
-# )
